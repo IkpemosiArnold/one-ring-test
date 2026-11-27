@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>One Ring Test</title>
+<link rel="icon" href="data:,">
+<meta name="description" content="A one-case ring test: a real evaluation write-up, a twin with six planted errors, and a harness that scores reviews against the key and the clean copy.">
+<style>
+:root{--bg:#f7f6f2;--fg:#1d211f;--muted:#5b625e;--line:#d9d8d1;--card:#ffffff;--accent:#2f5d4e;--hit:#1f6b3a;--miss:#9a3b1f;--mark:#fff1c2}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#141716;--fg:#eef0ec;--muted:#a6ada8;--line:#2e3431;--card:#1c201e;--accent:#8cc4ae;--hit:#7fd69b;--miss:#f0a184;--mark:#4a4220}}
+:root[data-theme="dark"]{--bg:#141716;--fg:#eef0ec;--muted:#a6ada8;--line:#2e3431;--card:#1c201e;--accent:#8cc4ae;--hit:#7fd69b;--miss:#f0a184;--mark:#4a4220}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:720px;margin:0 auto;padding:24px 16px 64px}
+h1{font-size:1.5rem;margin:0 0 6px}
+p.lede{margin:0 0 20px;color:var(--muted)}
+table{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line);border-radius:8px;overflow:hidden;font-variant-numeric:tabular-nums}
+th,td{padding:8px 10px;text-align:right;border-bottom:1px solid var(--line);font-size:.92rem}
+th:first-child,td:first-child{text-align:left}
+th{font-weight:600;color:var(--muted)}
+tr:last-child td{border-bottom:0}
+nav{display:flex;gap:8px;margin:24px 0 12px;flex-wrap:wrap}
+nav button,.btn{font:inherit;padding:8px 14px;border-radius:999px;border:1px solid var(--line);background:var(--card);color:var(--fg);cursor:pointer}
+nav button[aria-selected="true"]{background:var(--accent);color:var(--bg);border-color:var(--accent)}
+section[hidden]{display:none}
+ol{padding-left:0;list-style:none;margin:0}
+li.s{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin:0 0 8px}
+li.s b{color:var(--muted);font-weight:600;margin-right:6px}
+li.s.planted.show{background:var(--mark)}
+.why{display:block;margin-top:4px;font-size:.88rem;color:var(--muted)}
+textarea{width:100%;min-height:150px;font:15px/1.4 ui-monospace,Menlo,monospace;padding:10px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--fg)}
+.small{font-size:.88rem;color:var(--muted)}
+.hit{color:var(--hit)}.miss{color:var(--miss)}
+details{margin-top:12px}
+summary{cursor:pointer;color:var(--accent)}
+footer{margin-top:40px;font-size:.85rem;color:var(--muted)}
+a{color:var(--accent)}
+</style>
+</head>
+<body>
+<main>
+  <h1>One ring test</h1>
+  <p class="lede">My own published eval, plus a twin with six planted errors. Each lab reviews both copies. Flags on the clean copy count against it.</p>
+
+  <table id="board" aria-label="Leaderboard">
+    <thead><tr><th>Lab</th><th>Caught</th><th>False flags</th><th>F1</th></tr></thead>
+    <tbody></tbody>
+  </table>
+
+  <nav role="tablist">
+    <button role="tab" aria-selected="true" data-tab="case">The case</button>
+    <button role="tab" aria-selected="false" data-tab="try">Score a review</button>
+    <button role="tab" aria-selected="false" data-tab="how">How it scores</button>
+  </nav>
+
+  <section id="case">
+    <p class="small">The twin. The clean copy is the Evaluation section of the <a href="https://github.com/IkpemosiArnold/selects#evaluation">Selects README</a>.</p>
+    <ol id="twin"></ol>
+    <button class="btn" id="reveal">Show the key</button>
+  </section>
+
+  <section id="try" hidden>
+    <p class="small">One flag per line: sentence, then class. Classes: <code>numbers</code>, <code>overclaim</code>, <code>selection</code>, <code>prereg</code>.</p>
+    <textarea id="review" spellcheck="false" placeholder="S7 overclaim&#10;S5 numbers"></textarea>
+    <p><button class="btn" id="score">Score it</button></p>
+    <div id="result" aria-live="polite"></div>
+  </section>
+
+  <section id="how" hidden>
+    <ul class="small">
+      <li>A catch needs the right sentence and the right class. Right sentence, wrong class is counted apart and earns nothing.</li>
+      <li>Each copy gets a separate run. A catch counts only if the same flag is absent on the clean copy, so flagging everything scores zero.</li>
+      <li>Precision counts flags on both copies. Recall is catches out of six. A pasted review is scored on the twin only.</li>
+      <li>Plain code runs three rules with no model, written knowing the key, so they show what a rule can see: counts that should add up, "a of b" against "about 1 in k", and an interval that holds the null next to a claim of an effect.</li>
+      <li>What this skips: real reviews are free text, and matching them to a sentence and class is the hard part. The clean copy is assumed error-free.</li>
+    </ul>
+    <details><summary>Error classes</summary><ul class="small" id="classes"></ul></details>
+  </section>
+
+  <footer>Arnold Ikpemosi Adeyemi, <a href="https://ikpemosi.work">ikpemosi.work</a>. Runs in the browser; nothing is sent anywhere.</footer>
+</main>
+<script type="module">
+import { CLASSES, TWIN, KEY } from "./cases.js";
+import { leaderboard, parseReview, score } from "./harness.js";
+
+const $ = (s) => document.querySelector(s);
+const pct = (x) => x.toFixed(2);
+let mine = null;
+
+function drawBoard() {
+  const rows = leaderboard(mine ? [mine] : []);
+  $("#board tbody").innerHTML = rows.map((r) =>
+    `<tr><td>${r.name}</td><td>${r.tp} of ${KEY.length}</td><td>${r.falseTwin + r.wrongClass + r.falseClean}</td><td>${pct(r.f1)}</td></tr>`).join("");
+}
+
+const keyById = Object.fromEntries(KEY.map((k) => [k.id, k]));
+$("#twin").innerHTML = TWIN.map((s) =>
+  `<li class="s${keyById[s.id] ? " planted" : ""}" data-id="${s.id}"><b>${s.id}</b>${s.text}</li>`).join("");
+$("#classes").innerHTML = Object.entries(CLASSES).map(([k, v]) => `<li><code>${k}</code>: ${v}</li>`).join("");
+
+$("#reveal").addEventListener("click", (e) => {
+  const on = e.target.textContent === "Show the key";
+  document.querySelectorAll("li.planted").forEach((li) => {
+    li.classList.toggle("show", on);
+    li.querySelector(".why")?.remove();
+    if (on) { const k = keyById[li.dataset.id]; li.insertAdjacentHTML("beforeend", `<span class="why">${k.cls}: ${k.why}</span>`); }
+  });
+  e.target.textContent = on ? "Hide the key" : "Show the key";
+});
+
+document.querySelectorAll("nav button").forEach((b) => b.addEventListener("click", () => {
+  document.querySelectorAll("nav button").forEach((x) => x.setAttribute("aria-selected", x === b));
+  document.querySelectorAll("main > section").forEach((s) => (s.hidden = s.id !== b.dataset.tab));
+}));
+
+$("#score").addEventListener("click", () => {
+  const flags = parseReview($("#review").value);
+  const r = score(flags, []);
+  mine = flags.length ? { name: "Your review (twin only)", ...r } : null;
+  const missed = KEY.filter((k) => !r.caught.includes(k.id + " " + k.cls)).map((k) => k.id);
+  $("#result").innerHTML = flags.length
+    ? `<p><span class="hit">Caught ${r.tp} of ${KEY.length}.</span> ${r.wrongClass ? `${r.wrongClass} right sentence, wrong class. ` : ""}${r.falseTwin ? `<span class="miss">${r.falseTwin} false flag${r.falseTwin > 1 ? "s" : ""}.</span> ` : ""}Missed: ${missed.join(", ") || "none"}.</p>`
+    : `<p class="small">No flags read. Try lines like "S7 overclaim".</p>`;
+  drawBoard();
+});
+
+drawBoard();
+</script>
+</body>
+</html>
